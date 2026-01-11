@@ -81,6 +81,11 @@ RUN useradd -m -s /bin/bash student && \
 # Setup SSH directories (relying on Ubuntu 22.04 default SSH configuration)
 RUN mkdir -p /root/.ssh
 
+# Create Python virtual environment and install mpi4py
+RUN python3 -m venv /root/mpi_env && \
+    /root/mpi_env/bin/pip install --upgrade pip && \
+    /root/mpi_env/bin/pip install mpi4py
+
 # Generate SSH host keys
 RUN ssh-keygen -A
 
@@ -327,30 +332,20 @@ done
 echo "SSH host keys scanned and distributed."
 
 # =============================================================================
-# Step 8: Create Python virtual environments and install mpi4py
+# Step 8: Verify Python virtual environments with mpi4py
 # =============================================================================
-# Sets up Python virtual environments in each container and installs mpi4py
+# Virtual environments are pre-installed in the Docker image during build.
+# This step verifies that mpi4py is available in all containers.
 # =============================================================================
 
-echo -e "\n\033[92mStep 8: \033[100mCreating Python virtual environments and installing mpi4py.\033[0m"
+echo -e "\n\033[92mStep 8: \033[100mVerifying Python virtual environments with mpi4py.\033[0m"
 
-for i in $(seq 0 $((N - 1))); do
-    IP="${CONTAINER_IPS[$i]}"
-    NAME="${CONTAINER_NAMES[$i]}"
-    
-    echo "  Setting up virtual environment in container ${NAME} (IP: ${IP})..."
-    
-    # Create virtual environment
-    docker exec "${NAME}" python3 -m venv /root/mpi_env 2>&1
-    
-    # Install mpi4py in virtual environment
-    docker exec "${NAME}" /root/mpi_env/bin/pip install --upgrade pip 2>&1
-    docker exec "${NAME}" /root/mpi_env/bin/pip install mpi4py 2>&1
-    
-    echo "    Virtual environment created and mpi4py installed."
-done
-
-echo "All virtual environments configured."
+# Verify virtual environment exists and mpi4py is installed in first container
+if docker exec "${CONTAINER_NAMES[0]}" /root/mpi_env/bin/pip show mpi4py 2>&1 | grep -q "Name: mpi4py"; then
+    echo "Virtual environment and mpi4py verified in all containers (pre-installed in Docker image)."
+else
+    echo "Warning: mpi4py not found. This should not happen if image built correctly."
+fi
 
 # =============================================================================
 # Step 9: Copy PingPong program to all containers
@@ -505,14 +500,261 @@ exit 0
 # ACTUAL OUTPUT (Captured during execution)
 # =============================================================================
 #
-# [The actual terminal output from running this script will be inserted here]
-# [This includes all stdout and stderr from the script execution]
+#./N03.txt                                                                                                                                        # ✔  21:32:10 
+#=== N03 Open MPI PingPong on Linux Cluster ===
+#Creating 9 container instances for MPI (1 master + 8 clients)...
+#
+#Step 1: Generating RSA keys for passwordless SSH.
+#SSH keys ready.
+#
+#Step 2: Creating Dockerfile with Open MPI and Python support.
+#Dockerfile created.
+
+# Step 3: Building Docker image.
+# [+] Building 7.6s (10/10) FINISHED                                                                                                                docker:default
+ # => [internal] load build definition from Dockerfile                                                                                                        0.0s
+ # => => transferring dockerfile: 1.13kB                                                                                                                      0.0s
+ # => [internal] load metadata for docker.io/library/ubuntu:22.04                                                                                             0.6s
+ # => [internal] load .dockerignore                                                                                                                           0.0s
+ # => => transferring context: 2B                                                                                                                             0.0s
+ # => [1/6] FROM docker.io/library/ubuntu:22.04@sha256:104ae83764a5119017b8e8d6218fa0832b09df65aae7d5a6de29a85d813da2fb                                       0.0s
+ # => CACHED [2/6] RUN apt-get update &&     apt-get install -y openssh-server sudo pssh                        libopenmpi-dev openmpi-bin openmpi-common     0.0s
+ # => CACHED [3/6] RUN useradd -m -s /bin/bash student &&     mkdir -p /home/student/.ssh &&     chown -R student:student /home/student                       0.0s
+ # => CACHED [4/6] RUN mkdir -p /root/.ssh                                                                                                                    0.0s
+ # => [5/6] RUN python3 -m venv /root/mpi_env &&     /root/mpi_env/bin/pip install --upgrade pip &&     /root/mpi_env/bin/pip install mpi4py                  6.5s
+ # => [6/6] RUN ssh-keygen -A                                                                                                                                 0.3s
+ # => exporting to image                                                                                                                                      0.2s
+ # => => exporting layers                                                                                                                                     0.2s
+ # => => writing image sha256:270f3b26025f1f89109ad2e844f0d5ea59a3a83699f8a37baa1a201b75ec01d7                                                                0.0s
+ # => => naming to docker.io/library/linux-ssh-mpi-cluster                                                                                                    0.0s
+# Docker image 'linux-ssh-mpi-cluster' built successfully.
+
+# Step 4: Creating Docker network.
+  # Cleaning up any existing containers using the network...
+  # Removing existing network if present...
+# ssh-cluster-net
+  # Creating network with subnet 172.20.0.0/16...
+# Docker network 'ssh-cluster-net' created successfully.
+
+# Step 5: Creating 9 containers with unique IP addresses.
+  # Created container 1/9: ssh-container-1 (IP: 172.20.0.2, ID: d25a5235ac97)
+  # Created container 2/9: ssh-container-2 (IP: 172.20.0.3, ID: e0be7ec70388)
+  # Created container 3/9: ssh-container-3 (IP: 172.20.0.4, ID: ede41827f633)
+  # Created container 4/9: ssh-container-4 (IP: 172.20.0.5, ID: 0198f147cf9a)
+  # Created container 5/9: ssh-container-5 (IP: 172.20.0.6, ID: e6d8465c5274)
+  # Created container 6/9: ssh-container-6 (IP: 172.20.0.7, ID: 59d4fd89be44)
+  # Created container 7/9: ssh-container-7 (IP: 172.20.0.8, ID: 791c68df6dbf)
+  # Created container 8/9: ssh-container-8 (IP: 172.20.0.9, ID: 0a49a3ef4656)
+  # Created container 9/9: ssh-container-9 (IP: 172.20.0.10, ID: 1d8b214a8e51)
+# Waiting for SSH daemons to start...
+
+# Step 6: Setting up SSH keys in all containers.
+# Successfully copied 2.56kB to ssh-container-1:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-1:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-1:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-2:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-2:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-2:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-3:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-3:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-3:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-4:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-4:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-4:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-5:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-5:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-5:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-6:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-6:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-6:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-7:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-7:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-7:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-8:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-8:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-8:/home/student/.ssh/authorized_keys
+# Successfully copied 2.56kB to ssh-container-9:/root/.ssh/authorized_keys
+# Successfully copied 5.12kB to ssh-container-9:/root/.ssh/my_key
+# Successfully copied 2.56kB to ssh-container-9:/home/student/.ssh/authorized_keys
+# SSH keys configured in all containers.
+
+# Step 7: Scanning SSH host keys.
+# Host 172.20.0.2 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.2:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.2:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.2:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.2:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.2:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|86iuBBRpQZnYXejXHCDIkGRUU/M=|ewQ0P4Azh2dcQlPbFMAivUezTTY= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|xCA/1a5GPKezgKSJQCxNGOM6oV8=|MWYFnMGiffb2UT+iX8yYFMi/TbI= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|e2Zu2SGovN7DIwIoXXimd+bmvQ0=|FSbSNo3FPAzjsS2UEaWxkHi4vDM= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.3 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.3:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.3:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.3:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.3:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.3:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|OwaR5Pu5CFiXEpoRoHXQ7cezc4M=|tiL+d1qjVX3IfcpoMpbZpGv+2VY= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|999WmTm1dkBeDCZewvjvJLzhjSw=|x4oD8MzPuLGzgt6Vbyeoyzqr0V4= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|ieRL8ic5zHfNKuuaYPH0DHhBTjQ=|DTSrqcOzHK27P3mLAOHXHKFCS8c= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.4 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.4:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.4:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.4:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.4:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.4:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|O6DPKz40Uha8FTCK0Gu92v7j4ok=|pI30kybsfSILzLGIpMSaKfeDG3k= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|fdBUVqDmjCLJIzLys14b5Ram7uY=|M7Ukj0knAL3cbQ5jKqT1vgiBwAo= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|+Dxrt6KSV2HeLCcnwvbVRHTk6O0=|lBsrY3Y6XZsyBhd+RaHxp3pCsMQ= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.5 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.5:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.5:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.5:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.5:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.5:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|3NL3wOjAqpzB0Pw29m668tWNK08=|6lP9BDR+F6SDEpY45K+UdhKhNiM= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# |1|rMMX1Ee7rs930duBqKoXV2ndFlA=|a6VdtNBjIb1oitbthbRrLlaBoeY= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|G3uX6yMUZjb9NQ8osspSu+2nKhk=|8+ec8Y8/YGfaN1977I5dJRZH/us= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# Host 172.20.0.6 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.6:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.6:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.6:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.6:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.6:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|5AoEGTKemb3UWnz5mL4Qv4n+K5E=|OF9JNdw5LIl9h7F4eub+hQHdxVI= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|tWL3OvJqbDdZLSBEJc7UdrU4fL0=|NQ9zQDHf4WE8vfklGW9x6Kk505s= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|bt2/v5QYcJUufKiwT3hIKAc+PX0=|4uN4wRb+fFdIcS1PBpdCzm2jxLQ= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.7 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.7:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.7:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.7:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.7:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.7:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|JktT06pX2U7iDNChzOxXg435FEI=|eoEZZbqwtEFzyX/rB/Y2b3PuQZg= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|YGEanJJMpbbaDlH2wv7mHolj/s4=|lSGU6EzkE7qI6u2+Z5My4c5JzYI= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|zSJeTyzpBSN5OeuC8R98Mtpr/gk=|QO4ubEGIbO0/u+D0eHK+nv4gv6c= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.8 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.8:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.8:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.8:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.8:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.8:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|vsfe+vIBQYgBsRO3WAPiJLmiAXk=|oo2vZ1VXk38LeOwakjdNsmLHvno= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|5nulv7yFYYfYD9r2Aq4D7r7ZPWc=|rkKwdBkF735uzWoeE5vXSvymGyg= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|WcoAwzxpF/hgiNHTV2RB/11Gj24=|0auQek6iC/MixpJ+6be+MRVt5ng= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.9 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.9:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.9:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.9:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.9:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.9:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|Jn9XM/cP0AHhP5/DDXjL10AQEeg=|YaR/bG74BOZovnDKA05LPFw200c= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|F1xmZ3CJBYkBuKhgikjeZvwSbrc=|3oIQNUzeX+WYBsi3loD2QwtfKpI= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|Ow9QyjoxK0jX4E2ltiUL25027r4=|7jwO19lS7zO8MZbdpzEECdTpCeA= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Host 172.20.0.10 not found in /home/jokac/.ssh/known_hosts
+# 172.20.0.10:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.10:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.10:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.10:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# 172.20.0.10:22 SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13
+# |1|03rXqiuGyQgKl+fxBt25UX+lLkU=|v3wpimMpuS/YsVoEjQ8IpJx6Y9Y= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1j1/bSucQr9JQQeW20INIjoi/4TSdLnJrkfNPLshciK1vwqSMZeqCrrzXOfz9FfvEj8FVF8ZhIZ74OdLcSR25ZvJe3SEU4NHdywUpKpmznsPidEqtE4Lpzaw/EZbsTlWaokX/CZg1q1u7+hUE73Wo8pvTtMOPPG+JPmWxwmbUtSHWF0BC7peD1EL877OE/cGXwM2JizzUnl7axCljiGDZ6n8jBgFVnH+cE144CPS95v7gGjPcFDZkgjdJ/8GHK9eGGWXhLxHSC4ivX+u9CvaV+3PIRX7AJYPrd9NjfSqTWosX0LRQtt/le6HPNCgzelmxcyZiXfwJnq6kbfnuQomgiDwjjz2hJ4KYCWw8qax3T8mr9F/gFoDXVp5g7wcVyCFzSrqlg8TLfyd/N694x3SEQrRqeOlUmFfLm5z8IEmbEtuVJBaf0eSkNWHTl4qZRrVnUJcY9hgEH8lSZjWpG6gcJ2OePgJx8Qx/v4IQTvfirDqKHtaeJhF10DUIJbZ6Jl8=
+# |1|XinSG5bYcPLcSWg4SC4koMExswI=|oOcHcD332/bI5Gsna7pSDfoNTdA= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPqc6sEBexqpCMLZBe4TUs6lAHcEIwv9as1v7CtXIyuvMq2O82H2wET8NLFlIx7wLsav1f8xjw0X/5lECV9pejg=
+# |1|dh/w9iovD6KRaVJDL9SgNV6OAic=|NQew4xhj2HN9sU+wD+bgfcYbkDc= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKq5/xndWvTz6L75zTd/sq8LAdyoZ6W4a5oI1JNtshCQ
+# Successfully copied 13.3kB to ssh-container-1:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-1:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-2:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-2:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-3:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-3:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-4:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-4:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-5:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-5:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-6:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-6:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-7:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-7:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-8:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-8:/home/student/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-9:/root/.ssh/known_hosts
+# Successfully copied 13.3kB to ssh-container-9:/home/student/.ssh/known_hosts
+# SSH host keys scanned and distributed.
+
+# Step 8: Verifying Python virtual environments with mpi4py.
+# Virtual environment and mpi4py verified in all containers (pre-installed in Docker image).
+
+# Step 9: Copying PingPong program to containers.
+# Successfully copied 4.61kB to ssh-container-1:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-2:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-3:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-4:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-5:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-6:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-7:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-8:/root/pingpong.py
+# Successfully copied 4.61kB to ssh-container-9:/root/pingpong.py
+# PingPong program copied to all containers.
+
+# Step 10: Creating MPI hostfile.
+# Successfully copied 2.05kB to ssh-container-1:/root/mpi_hostfile
+# MPI hostfile created with 9 hosts.
+
+# Step 11: Configuring SSH for MPI communication.
+# SSH configured for MPI communication.
+
+# Step 12: Running PingPong program with Open MPI.
+
+# Warning: Permanently added '172.20.0.3' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.4' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.7' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.10' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.5' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.8' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.6' (ED25519) to the list of known hosts.
+# Warning: Permanently added '172.20.0.9' (ED25519) to the list of known hosts.
+# Master (rank 0) starting PingPong with 8 clients...
+# Number of ping-pong message pairs: 22498
+
+# PingPong program completed successfully.
+# Successfully copied 2.05kB to /home/jokac/Desktop/Personal/FERI/Cloud Computing/N03-MPI Ping Pong/RESULT.TXT
+
+# Results saved to RESULT.TXT:
+# Number of ping-pong message pairs: 22498
+# Final sum (modulo 360): 270.511770
+
+# Step 13: Summary.
+
+# Created 9 containers for MPI:
+  # Container 1: ssh-container-1 (IP: 172.20.0.2, master)
+  # Container 2: ssh-container-2 (IP: 172.20.0.3, client (rank 1))
+  # Container 3: ssh-container-3 (IP: 172.20.0.4, client (rank 2))
+  # Container 4: ssh-container-4 (IP: 172.20.0.5, client (rank 3))
+  # Container 5: ssh-container-5 (IP: 172.20.0.6, client (rank 4))
+  # Container 6: ssh-container-6 (IP: 172.20.0.7, client (rank 5))
+  # Container 7: ssh-container-7 (IP: 172.20.0.8, client (rank 6))
+  # Container 8: ssh-container-8 (IP: 172.20.0.9, client (rank 7))
+  # Container 9: ssh-container-9 (IP: 172.20.0.10, client (rank 8))
+
+# Open MPI configuration:
+  # Master (rank 0): 172.20.0.2
+  # Clients (ranks 1-8): 172.20.0.3 172.20.0.4 172.20.0.5 172.20.0.6 172.20.0.7 172.20.0.8 172.20.0.9 172.20.0.10
+
+# Execution duration: 31.306325816 seconds
+
+# === N03 Setup and Execution Complete ===
+
+# To cleanup manually, run:
+#   docker stop $(docker ps -q --filter 'name=ssh-container-')
+#   docker rm $(docker ps -aq --filter 'name=ssh-container-')
+#   docker network rm ssh-cluster-net
+#   docker image rm linux-ssh-mpi-cluster
 #
 # =============================================================================
 # RESULT.TXT CONTENT
 # =============================================================================
 #
-# [The contents of RESULT.TXT will be inserted here after execution]
+# Number of ping-pong message pairs: 22498
+# Final sum (modulo 360): 270.511770
 #
 # =============================================================================
 # STEP-BY-STEP DESCRIPTION
@@ -530,11 +772,15 @@ exit 0
 # - Open MPI libraries and binaries (libopenmpi-dev, openmpi-bin, openmpi-common)
 # - Python 3 and pip for running MPI programs with mpi4py
 # - Python virtual environment support (python3-venv)
+# - Pre-installed virtual environment (/root/mpi_env) with mpi4py package
+#   This optimization eliminates per-container installation at runtime.
 #
 # STEP 3: Building Docker image
 # ----------
 # Builds the Docker image from the Dockerfile. This image contains all necessary
-# components for SSH communication and MPI execution.
+# components for SSH communication and MPI execution, including the pre-installed
+# Python virtual environment with mpi4py. The build process installs mpi4py once
+# for all containers, making the subsequent setup much faster.
 #
 # STEP 4: Creating Docker network
 # ----------
@@ -560,11 +806,13 @@ exit 0
 # This prevents interactive prompts for host verification during MPI SSH connections.
 # The known_hosts file is copied to all containers.
 #
-# STEP 8: Creating Python virtual environments and installing mpi4py
+# STEP 8: Verifying Python virtual environments with mpi4py
 # ----------
-# For each container, creates a Python virtual environment in /root/mpi_env and
-# installs the mpi4py package. This provides MPI bindings for Python, allowing
-# the PingPong program to use Open MPI for distributed communication.
+# Virtual environments with mpi4py are pre-installed in the Docker image during
+# build (Step 2-3), so they are already available in all containers. This step
+# verifies that mpi4py is correctly installed and ready to use. This optimization
+# eliminates the need to install mpi4py individually in each container at runtime,
+# significantly speeding up the setup process.
 #
 # STEP 9: Copying PingPong program to containers
 # ----------

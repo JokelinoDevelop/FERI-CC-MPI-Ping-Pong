@@ -1,65 +1,76 @@
-# N02 Linux Cluster SSH Environment Setup - Beginner's Guide
+# N03 Open MPI PingPong on Linux Cluster - Beginner's Guide
 
 ## What is this project?
 
-This project creates a **Linux cluster** - a group of connected Linux computers that can talk to each other using SSH (Secure Shell). Instead of using real physical computers, we use **Docker containers** (like lightweight virtual machines).
+This project extends **N02** by adding **Open MPI** (Message Passing Interface) capabilities to the Linux cluster. It creates a **distributed computing environment** where 9 Docker containers work together using MPI to run a PingPong program. Instead of using real physical computers, we use **Docker containers** (like lightweight virtual machines) that communicate using SSH and MPI.
 
 ## 🏗️ What does the script do?
 
-The `N02.txt` script automatically sets up N identical Linux environments that can communicate with each other. Here's what happens when you run it:
+The `N03.txt` script automatically sets up 9 Linux environments with Open MPI installed in Python virtual environments and runs a PingPong program. Here's what happens when you run it:
 
-### Step 1: Generate SSH Keys 🔑
+### Steps 1-7: Cluster Setup (from N02) 🔧
 
-- Creates a pair of special files (public key and private key)
-- These act like a digital key and lock for secure connections
-- Think of it like a master key that works for all your "houses" (containers)
+These steps are identical to N02 and create the SSH cluster infrastructure:
 
-### Step 2: Create a Docker Blueprint 🏭
+1. **Generate SSH Keys** 🔑 - Creates passwordless authentication keys
+2. **Create Dockerfile** 🏭 - Builds Ubuntu image with OpenSSH, Open MPI, and Python
+3. **Build Docker Image** 🛠️ - Creates the container template
+4. **Create Private Network** 🌐 - Sets up Docker bridge network
+5. **Launch 9 Containers** 🚀 - Creates containers for MPI ranks 0-8
+6. **Setup SSH Keys** 🔐 - Configures passwordless SSH in all containers
+7. **Scan SSH Host Keys** 🤝 - Sets up host key verification
 
-- Makes a `Dockerfile` that describes how to build each Linux container
-- Includes Ubuntu Linux, SSH server, and tools for parallel connections
+### Step 8: Python Virtual Environments 🐍
 
-### Step 3: Build the Docker Image 🛠️
+- Creates a Python virtual environment in each container (`/root/mpi_env`)
+- Installs `mpi4py` package in each virtual environment
+- This allows Python programs to use Open MPI for distributed computing
 
-- Takes the blueprint and creates a reusable template
-- Like baking a cake from a recipe - you can make multiple identical cakes
+### Step 9: Copy PingPong Program 📋
 
-### Step 4: Create a Private Network 🌐
+- Copies the `pingpong.py` program to all containers
+- This program implements the MPI PingPong logic
 
-- Sets up a virtual network where containers can talk to each other
-- Gives each container its own unique IP address (like house numbers)
+### Step 10: Create MPI Hostfile 📝
 
-### Step 5: Launch N Containers 🚀
+- Creates a hostfile listing all 9 container IP addresses
+- Tells Open MPI which hosts are available and how many processes can run on each
 
-- Creates N copies of the Linux environment
-- Each gets a unique name and IP address
-- Default is 3 containers, but you can specify any number
+### Step 11: Configure SSH for MPI 🔌
 
-### Step 6: Setup SSH Keys in All Containers 🔐
+- Configures SSH to allow passwordless MPI communication between containers
+- Open MPI uses SSH to launch processes on remote containers
 
-- Copies the master SSH keys to every container
-- Sets up passwordless login between all containers
+### Step 12: Run PingPong Program 🎾
 
-### Step 7: Scan and Trust SSH Fingerprints 🤝
+- Executes the PingPong program using `mpirun` with 9 processes:
+  - **Rank 0 (Master)**: Sends random floats (0.00-180.00) to clients
+  - **Ranks 1-8 (Clients)**: Receive numbers and echo them back to master
+  - Master accumulates sum modulo 360
+  - Continues until sum is between **270.505 and 270.515**
+  - Prints the number of ping-pong message pairs to terminal and `RESULT.TXT`
 
-- Collects unique identifiers (fingerprints) from each container
-- Creates a "phonebook" so containers know each other
+### Step 13: Summary 📊
 
-### Step 8: Test Host → Container Connections 🖥️→💻
+- Displays container information, MPI rank assignments, and execution statistics
 
-- From your computer, connects to each container
-- Runs `hostname -I` command to show the container's IP address
+## 🎾 What is the PingPong Program?
 
-### Step 9: Test All Container-to-Container Connections 💻↔️💻
+The PingPong program demonstrates **distributed computing** using MPI:
 
-- Each container connects to all other containers
-- Uses `parallel-ssh` to test multiple connections at once
-- Runs `hostname -I` on each target container
+1. **Master (Rank 0)** generates 8 random floating-point numbers (0.00 to 180.00)
+2. **Master sends** one number to each client (ranks 1-8)
+3. **Clients receive** their number and **echo it back** to master
+4. **Master receives** all 8 numbers and adds them to a running sum
+5. The sum is kept **modulo 360** (like degrees on a circle)
+6. Process repeats until the sum is between **270.505 and 270.515**
+7. Final result: Number of ping-pong iterations required to reach the target range
 
-### Step 10: Summary 📊
-
-- Shows how many containers were created
-- Counts total connections tested
+**Example output:**
+```
+Master (rank 0) starting PingPong with 8 clients...
+Number of ping-pong message pairs: 8915
+```
 
 ## 🚀 How to Run It
 
@@ -67,152 +78,104 @@ The `N02.txt` script automatically sets up N identical Linux environments that c
 
 - Docker must be installed and running
 - Basic command line knowledge
+- Python 3 (for understanding the program)
 
 ### Basic Usage
 
 ```bash
-# Create 3 containers (default)
-./N02.txt
-
-# Create 5 containers
-./N02.txt 5
-
-# Create 10 containers
-./N02.txt 10
+# Run the script (creates 9 containers automatically)
+./N03.txt
 ```
+
+**Note:** Unlike N02, N03 always creates exactly 9 containers (1 master + 8 clients for MPI ranks 0-8).
 
 ### What You'll See
 
-The script will show progress through 10 steps, then display connection test results like:
+The script will show progress through 13 steps, including:
+- Docker image building with Open MPI
+- Virtual environment creation
+- MPI installation
+- PingPong program execution
+- Final results printed to terminal and saved to `RESULT.TXT`
 
 ```
-Host -> 172.21.0.2: 172.21.0.2
-Host -> 172.21.0.3: 172.21.0.3
-Host -> 172.21.0.4: 172.21.0.4
+Master (rank 0) starting PingPong with 8 clients...
+Number of ping-pong message pairs: 8915
 
-Container 172.21.0.2 connecting to all others:
-  [1] 23:14:04 [SUCCESS] 172.21.0.3
-  172.21.0.3
-  [2] 23:14:04 [SUCCESS] 172.21.0.4
-  172.21.0.4
+Results saved to RESULT.TXT:
+Number of ping-pong message pairs: 8915
+Final sum (modulo 360): 270.506406
 ```
 
-## 🌐 Docker Networking Explained (Beginner Friendly)
+## 🔧 Key Concepts Explained
 
-> 📖 **Want to learn more?** Check out our [complete Docker networking guide](DOCKER_NETWORKING.md) for advanced concepts and troubleshooting.
+### Open MPI 🚀
 
-### What is Docker Networking?
+- **Message Passing Interface (MPI)**: Standard for parallel and distributed computing
+- **Open MPI**: Open-source implementation of MPI
+- Allows programs to run across multiple computers/containers
+- Processes communicate by sending and receiving messages
 
-Imagine you have several houses (containers) in a neighborhood (network). Docker networking is like the roads and addresses that connect these houses, allowing them to communicate with each other.
+### Virtual Environments 🐍
 
-### Types of Docker Networks
+- **Python Virtual Environment**: Isolated Python environment for each container
+- Prevents conflicts between different projects
+- Contains its own Python packages (like `mpi4py`)
+- Located at `/root/mpi_env` in each container
 
-1. **Bridge Network** (What we use) - Like a private neighborhood
+### MPI Ranks 🏷️
 
-   - Isolated from other networks
-   - Containers get their own IP addresses
-   - Perfect for containers that need to talk to each other
+- Each MPI process gets a unique **rank** (number starting from 0)
+- **Rank 0**: Usually the "master" or "coordinator" process
+- **Ranks 1-8**: Worker or "client" processes
+- Ranks communicate using `MPI.COMM_WORLD` (the global communicator)
 
-2. **Host Network** - Containers share the host's network directly
+### PingPong Pattern 🎾
 
-3. **None Network** - No networking (containers are isolated)
+- Classic MPI pattern: Master sends data → Workers process → Workers send back
+- Demonstrates **bidirectional communication**
+- Used in distributed algorithms and parallel computing
 
-### How Our Script Uses Docker Networking
-
-#### Step 4: Creating the Network
-
-```bash
-docker network create --subnet=172.20.0.0/16 ssh-cluster-net
-```
-
-**What this means:**
-
-- `--subnet=172.20.0.0/16`: Creates a private IP address range
-  - `172.20.0.0/16` = IP addresses from 172.20.0.1 to 172.20.255.254
-  - `/16` means 65,536 possible addresses
-- `ssh-cluster-net`: Name of our private neighborhood
-
-#### Step 5: Connecting Containers to the Network
-
-```bash
-docker run -d --name ssh-container-1 --network ssh-cluster-net --ip 172.20.0.2 linux-ssh-cluster
-```
-
-**What this means:**
-
-- `--network ssh-cluster-net`: Connects container to our private network
-- `--ip 172.20.0.2`: Assigns specific address (like a house number)
-- Container gets its own unique IP address in the network
-
-### Network Communication Flow
+## 📁 Project Structure
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Host Computer │     │  Docker Bridge  │     │   Containers    │
-│   (Outside)     │─────│   Network       │─────│   (Inside)      │
-│                 │     │                 │     │                 │
-│ • IP: 192.168.x │     │ • Gateway:      │     │ • ssh-container-1│
-│ • Can access    │     │   172.20.0.1   │     │   IP: 172.20.0.2 │
-│   containers    │     │ • Subnet:       │     │                 │
-└─────────────────┘     │   172.20.0.0/16│     │ • ssh-container-2│
-                        └─────────────────┘     │   IP: 172.20.0.3 │
-                                                │                 │
-                                                │ • ssh-container-3│
-                                                │   IP: 172.20.0.4 │
-                                                └─────────────────┘
+/home/jokac/Desktop/Personal/FERI/Cloud Computing/N03-MPI Ping Pong/
+├── N03.txt              # Main script (extends N02)
+├── pingpong.py          # MPI PingPong Python program
+├── Dockerfile           # Docker blueprint (created by script)
+├── RESULT.TXT           # Output file (created after execution)
+├── docs/                # Documentation
+│   ├── README.md        # This file
+│   ├── index.md         # Documentation index
+│   └── ...              # Other documentation files
+├── keydir/              # SSH keys
+│   ├── my_key           # Private key
+│   └── my_key.pub       # Public key
+└── known_hosts          # SSH host fingerprints
 ```
 
-### Why IP Addresses Matter
+## 🌐 MPI Communication Flow
 
-1. **Unique Identity**: Each container has its own address
-2. **Routing**: Docker knows how to deliver traffic to the right container
-3. **SSH Access**: We can connect using `ssh root@172.20.0.2`
-
-### Real-World Analogy
-
-Think of it like this:
-
-- **Host Computer** = Your house with internet
-- **Docker Bridge Network** = A private gated community
-- **Subnet** = The community's address range (172.20.x.x)
-- **Container IPs** = Individual house numbers (172.20.0.2, 172.20.0.3, etc.)
-- **SSH Connections** = Phone calls between houses
-
-### Why This is Powerful
-
-1. **Isolation**: Containers can't interfere with your host network
-2. **Consistency**: Same setup works on any computer with Docker
-3. **Security**: Private network protects containers from outside access
-4. **Flexibility**: Easy to add/remove containers without affecting others
-
-### Troubleshooting Network Issues
-
-#### Check Network Exists
-
-```bash
-docker network ls
-# Should show: ssh-cluster-net-alt
 ```
+┌─────────────────┐
+│  Rank 0 (Master)│
+│  172.20.0.2     │
+└────────┬────────┘
+         │
+         ├─────────────┬─────────────┬─────────────┐
+         │             │             │             │
+    ┌────▼────┐  ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+    │Rank 1   │  │Rank 2   │  │Rank 3   │  │Rank 4   │
+    │172.20.0.3│  │172.20.0.4│  │172.20.0.5│  │172.20.0.6│
+    └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘
+         │             │             │             │
+         └─────────────┴─────────────┴─────────────┘
+                (and ranks 5, 6, 7, 8)
 
-#### Check Container IPs
-
-```bash
-docker inspect ssh-container-1 | grep IPAddress
-# Should show: "IPAddress": "172.21.0.2"
-```
-
-#### Test Connectivity
-
-```bash
-# From one container to another
-docker exec ssh-container-1 ping 172.21.0.2
-```
-
-#### View Network Details
-
-```bash
-docker network inspect ssh-cluster-net-alt
-# Shows all connected containers and their IPs
+1. Master sends random numbers → Clients
+2. Clients echo numbers back → Master
+3. Master accumulates sum (modulo 360)
+4. Repeat until sum ∈ [270.505, 270.515]
 ```
 
 ## 🧹 Cleanup
@@ -230,103 +193,52 @@ docker rm $(docker ps -aq --filter 'name=ssh-container-')
 docker network rm ssh-cluster-net-alt
 
 # Remove Docker image
-docker image rm linux-ssh-cluster
+docker image rm linux-ssh-mpi-cluster
 ```
-
-## 🔧 Key Concepts Explained
-
-### Docker Containers 🐳
-
-- Lightweight virtual machines
-- Share the host computer's kernel
-- Faster than full virtual machines (like VirtualBox)
-- Each container is isolated but can communicate via networks
-
-### SSH (Secure Shell) 🔒
-
-- Protocol for secure remote access to computers
-- Uses encryption to protect data
-- Can use passwords OR keys (we use keys for automation)
-
-### IP Addresses 📍
-
-- Unique identifiers for devices on a network
-- Like street addresses for houses
-- Format: `192.168.1.1` or `172.21.0.2`
-
-### Parallel SSH 📡
-
-- Tool to run the same command on multiple computers simultaneously
-- Much faster than connecting one-by-one
-- Essential for testing large clusters
-
-## 📁 Project Structure
-
-```
-/home/jokac/Desktop/Personal/FERI/Cloud Computing/N02-Linux Cluster/
-├── N02.txt              # Main script
-├── Dockerfile          # Docker blueprint (created by script)
-├── docs/               # Documentation
-│   └── README.md       # This file
-├── keydir/             # SSH keys
-│   ├── my_key          # Private key
-│   └── my_key.pub      # Public key
-└── known_hosts         # SSH host fingerprints
-```
-
-## 🤔 Why Docker Instead of VirtualBox?
-
-Your professor mentioned VirtualBox, but this project uses Docker because:
-
-1. **Faster**: Containers start in seconds vs minutes for VMs
-2. **Lighter**: Use less memory and CPU
-3. **Easier**: No GUI needed, works on servers
-4. **Same Result**: Still demonstrates SSH clustering concepts
 
 ## 🔍 Understanding the Output
 
-### Connection Testing Results
+### PingPong Execution
 
 ```
-Host -> 172.21.0.2: 172.21.0.2
+Master (rank 0) starting PingPong with 8 clients...
+Number of ping-pong message pairs: 8915
 ```
 
-- **Host**: Your computer
-- **->**: Connecting to
-- **172.21.0.2**: Container's IP address
-- **: 172.21.0.2**: Command output (shows container's IP)
+- **Master starting**: Rank 0 process begins coordination
+- **8 clients**: Ranks 1-8 are ready to receive messages
+- **8915 pairs**: Number of iterations needed to reach target sum range
+- Each "pair" = Master sends to all 8 + receives from all 8
 
-### Container-to-Container Results
+### RESULT.TXT
 
 ```
-Container 172.21.0.2 connecting to all others:
-  [1] 23:14:04 [SUCCESS] 172.21.0.3
-  172.21.0.3
+Number of ping-pong message pairs: 8915
+Final sum (modulo 360): 270.506406
 ```
 
-- Container A connects to Container B
-- `[1]`: First connection attempt
-- `[SUCCESS]`: Connection worked
-- `172.21.0.3`: Target container's IP
-- Second line: Output of `hostname -I` command
+- First line: Number of ping-pong iterations
+- Second line: Final accumulated sum (after modulo 360)
+- The sum is guaranteed to be between 270.505 and 270.515
 
 ## 🎯 What You Learn
 
 This project teaches:
 
-- **Network Configuration**: Setting up container networks
-- **SSH Key Management**: Passwordless authentication
-- **Parallel Processing**: Using tools like parallel-ssh
-- **Docker**: Container orchestration
-- **Bash Scripting**: Automating complex setups
-- **System Administration**: Managing multiple Linux systems
+- **Distributed Computing**: Running programs across multiple machines
+- **MPI Programming**: Message passing between processes
+- **Virtual Environments**: Python environment isolation
+- **Network Configuration**: Docker networking for MPI
+- **Parallel Algorithms**: Coordinating work across processes
+- **Docker Containerization**: Multi-container orchestration
+- **SSH Automation**: Passwordless remote execution
 
 ## ❓ Troubleshooting
 
 ### "Permission denied" errors
 
 - Make sure you're in the correct directory
-- Ensure the script is executable: `chmod +x N02.txt`
+- Ensure the script is executable: `chmod +x N03.txt`
 
 ### Docker not running
 
@@ -338,23 +250,42 @@ sudo systemctl status docker
 sudo systemctl start docker
 ```
 
-### Port conflicts
+### MPI execution fails
 
-- The script handles network conflicts automatically
-- May use `172.21.0.0/16` instead of `172.20.0.0/16`
+- Check that all 9 containers are running: `docker ps`
+- Verify SSH keys are set up: `docker exec ssh-container-1 ls -la /root/.ssh/`
+- Check virtual environment exists: `docker exec ssh-container-1 ls /root/mpi_env/`
 
-### SSH connection failures
+### Virtual environment issues
 
-- Wait for containers to fully start (script includes delays)
-- Check that SSH keys were copied correctly
+```bash
+# Verify mpi4py is installed
+docker exec ssh-container-1 /root/mpi_env/bin/pip list | grep mpi4py
+```
+
+### MPI process launch errors
+
+- Ensure SSH is working between containers
+- Check known_hosts file is present: `docker exec ssh-container-1 cat /root/.ssh/known_hosts`
 
 ## 📚 Further Reading
 
-- [Docker Documentation](https://docs.docker.com/)
-- [SSH Key Authentication](https://www.ssh.com/academy/ssh-keys)
-- [Parallel SSH Documentation](https://parallel-ssh.readthedocs.io/)
-- [Bash Scripting Guide](https://tldp.org/LDP/abs/html/)
+- [Open MPI Documentation](https://www.open-mpi.org/doc/)
+- [MPI4py Documentation](https://mpi4py.readthedocs.io/)
+- [Python Virtual Environments](https://docs.python.org/3/tutorial/venv.html)
+- [Docker Networking](https://docs.docker.com/network/)
+- [MPI Tutorial](https://computing.llnl.gov/tutorials/mpi/)
+
+## 🔗 Related Projects
+
+- **N02**: Base SSH cluster setup (prerequisite)
+- This project extends N02 with MPI capabilities
 
 ---
 
-**Congratulations!** You've just set up your first Linux cluster. This demonstrates real cloud computing concepts used by companies like Google, Amazon, and Microsoft to manage thousands of servers. 🚀
+**Congratulations!** You've just set up a distributed computing cluster using Open MPI. This demonstrates real parallel computing concepts used in high-performance computing (HPC), scientific simulations, and cloud computing platforms. 🚀
+
+---
+
+*Documentation created for Cloud Computing course - FERI*  
+*Last updated: N03 Open MPI PingPong version*

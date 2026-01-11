@@ -19,6 +19,11 @@ RUN useradd -m -s /bin/bash student && \
 # Setup SSH directories (relying on Ubuntu 22.04 default SSH configuration)
 RUN mkdir -p /root/.ssh
 
+# Create Python virtual environment and install mpi4py
+RUN python3 -m venv /root/mpi_env && \
+    /root/mpi_env/bin/pip install --upgrade pip && \
+    /root/mpi_env/bin/pip install mpi4py
+
 # Generate SSH host keys
 RUN ssh-keygen -A
 
