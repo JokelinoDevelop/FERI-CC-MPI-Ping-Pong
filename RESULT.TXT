@@ -1,0 +1,2 @@
+Number of ping-pong message pairs: 8915
+Final sum (modulo 360): 270.506406

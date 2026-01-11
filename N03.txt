@@ -1,0 +1,616 @@
+#!/bin/bash
+# =============================================================================
+# N03 - Open MPI PingPong on Linux Cluster
+# =============================================================================
+# Description:
+# This script extends N02 by installing Open MPI in Python virtual environments
+# and running a PingPong program. The program uses 9 processes (1 master rank 0
+# and 8 client ranks 1-8) to send random floating point numbers, accumulate
+# their sum modulo 360, and continue until the sum is between 270.505 and 270.515.
+#
+# Usage: ./N03.txt
+#   Creates 9 containers (for ranks 0-8) and runs the PingPong program
+#
+# Author: Jovan Veljanoski
+# License: CC BY-NC 4.0
+# =============================================================================
+
+# Set number of containers to 9 (1 master + 8 clients)
+N=9
+
+echo "=== N03 Open MPI PingPong on Linux Cluster ==="
+echo "Creating $N container instances for MPI (1 master + 8 clients)..."
+echo ""
+
+time_start=$(date +%s.%N)
+
+# =============================================================================
+# Step 1: Generate SSH key pair for passwordless authentication
+# =============================================================================
+# This key will be shared across all containers for SSO (Single Sign-On)
+# =============================================================================
+
+echo -e "\033[92mStep 1: \033[100mGenerating RSA keys for passwordless SSH.\033[0m"
+
+KEY_DIR="keydir"
+PRIVATE_KEY="${KEY_DIR}/my_key"
+PUBLIC_KEY="${KEY_DIR}/my_key.pub"
+
+# Create key directory if it doesn't exist
+mkdir -p "${KEY_DIR}"
+chmod 700 "${KEY_DIR}"
+
+# Generate passwordless RSA key if it doesn't exist
+if [ ! -f "${PRIVATE_KEY}" ]; then
+    ssh-keygen -t rsa -b 4096 -f "${PRIVATE_KEY}" -N "" -C "ssh-cluster-key"
+fi
+
+chmod 600 "${PRIVATE_KEY}"
+chmod 644 "${PUBLIC_KEY}"
+
+echo "SSH keys ready."
+
+# =============================================================================
+# Step 2: Create Dockerfile with Open MPI and Python support
+# =============================================================================
+# Creates a Dockerfile that sets up Ubuntu with OpenSSH, Open MPI, Python,
+# and virtual environment support
+# =============================================================================
+
+echo -e "\n\033[92mStep 2: \033[100mCreating Dockerfile with Open MPI and Python support.\033[0m"
+
+cat > Dockerfile << 'DOCKERFILE_EOF'
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during apt installs
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install OpenSSH server, sudo, parallel-ssh, Open MPI, Python3, pip, and venv
+RUN apt-get update && \
+    apt-get install -y openssh-server sudo pssh \
+                       libopenmpi-dev openmpi-bin openmpi-common \
+                       python3 python3-pip python3-venv && \
+    mkdir -p /var/run/sshd && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user with home directory and SSH folder
+RUN useradd -m -s /bin/bash student && \
+    mkdir -p /home/student/.ssh && \
+    chown -R student:student /home/student
+
+# Setup SSH directories (relying on Ubuntu 22.04 default SSH configuration)
+RUN mkdir -p /root/.ssh
+
+# Generate SSH host keys
+RUN ssh-keygen -A
+
+# Expose port 22 for SSH
+EXPOSE 22
+
+# Start the SSH daemon in foreground when container runs
+CMD ["/usr/sbin/sshd", "-D"]
+DOCKERFILE_EOF
+
+echo "Dockerfile created."
+
+# =============================================================================
+# Step 3: Build Docker image
+# =============================================================================
+# Builds the Docker image with all necessary components including Open MPI
+# =============================================================================
+
+echo -e "\n\033[92mStep 3: \033[100mBuilding Docker image.\033[0m"
+
+IMAGE_NAME="linux-ssh-mpi-cluster"
+
+# Stop and remove any existing containers with our naming pattern
+docker ps -a --filter "name=ssh-container-" --format "{{.ID}}" | xargs -r docker rm -f 2>&1 || true
+
+# Build the image
+docker build -t "${IMAGE_NAME}" . 2>&1
+
+if [ $? -eq 0 ]; then
+    echo "Docker image '${IMAGE_NAME}' built successfully."
+else
+    echo "Error: Failed to build Docker image"
+    exit 1
+fi
+
+# =============================================================================
+# Step 4: Create custom Docker network
+# =============================================================================
+# Creates a bridge network so containers can communicate with each other
+# =============================================================================
+
+echo -e "\n\033[92mStep 4: \033[100mCreating Docker network.\033[0m"
+
+NETWORK_NAME="ssh-cluster-net"
+
+# First, stop and remove any containers that might be using this network
+echo "  Cleaning up any existing containers using the network..."
+docker ps -a --filter "name=ssh-container-" --format "{{.ID}}" | while read CID; do
+    docker stop "$CID" 2>&1 || true
+    docker rm "$CID" 2>&1 || true
+done || true
+
+# Remove existing network if it exists
+echo "  Removing existing network if present..."
+if docker network inspect "${NETWORK_NAME}" 2>&1 > /dev/null; then
+    # Disconnect any containers still connected
+    docker network inspect "${NETWORK_NAME}" --format '{{range .Containers}}{{.Name}} {{end}}' 2>&1 | \
+        tr ' ' '\n' | grep -v '^$' | while read CONTAINER_NAME; do
+            docker network disconnect -f "${NETWORK_NAME}" "${CONTAINER_NAME}" 2>&1 || true
+        done
+    docker network rm "${NETWORK_NAME}" 2>&1 || true
+    sleep 2
+fi
+
+# Create new bridge network with subnet for predictable IPs
+echo "  Creating network with subnet 172.20.0.0/16..."
+NETWORK_ERROR=$(docker network create --subnet=172.20.0.0/16 "${NETWORK_NAME}" 2>&1)
+NETWORK_EXIT_CODE=$?
+
+if [ $NETWORK_EXIT_CODE -eq 0 ]; then
+    echo "Docker network '${NETWORK_NAME}' created successfully."
+else
+    # Check if it's a subnet conflict - try a different subnet
+    if echo "$NETWORK_ERROR" | grep -q "already exists\|overlaps"; then
+        echo "  Subnet conflict detected, trying alternative subnet..."
+        # Try alternative subnet
+        NETWORK_NAME_ALT="ssh-cluster-net-alt"
+        if docker network inspect "${NETWORK_NAME_ALT}" 2>&1 > /dev/null; then
+            docker network rm "${NETWORK_NAME_ALT}" 2>&1 || true
+            sleep 1
+        fi
+        
+        if docker network create --subnet=172.21.0.0/16 "${NETWORK_NAME_ALT}" 2>&1; then
+            NETWORK_NAME="${NETWORK_NAME_ALT}"
+            echo "Docker network '${NETWORK_NAME}' created with alternative subnet."
+        else
+            # Last resort: create without specifying subnet
+            echo "  Creating network without custom subnet..."
+            if docker network create "${NETWORK_NAME}" 2>&1; then
+                echo "Docker network '${NETWORK_NAME}' created (using default subnet)."
+            else
+                echo "Error: Failed to create Docker network"
+                echo "Error details: $NETWORK_ERROR"
+                exit 1
+            fi
+        fi
+    else
+        # If creation fails, check if network already exists  
+        if docker network inspect "${NETWORK_NAME}" 2>&1 > /dev/null; then
+            echo "Docker network '${NETWORK_NAME}' already exists, reusing it."
+        else
+            echo "Error: Failed to create Docker network"
+            echo "Error details: $NETWORK_ERROR"
+            exit 1
+        fi
+    fi
+fi
+
+# =============================================================================
+# Step 5: Create N containers with unique IP addresses
+# =============================================================================
+# Creates N containers (9 for MPI: rank 0 master + ranks 1-8 clients)
+# =============================================================================
+
+echo -e "\n\033[92mStep 5: \033[100mCreating $N containers with unique IP addresses.\033[0m"
+
+CONTAINER_IDS=()
+CONTAINER_IPS=()
+CONTAINER_NAMES=()
+
+# Check if network has a custom subnet (for IP assignment)
+NETWORK_SUBNET=$(docker network inspect "${NETWORK_NAME}" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>&1)
+HAS_CUSTOM_SUBNET=false
+
+# Determine base IP from network subnet if available
+if echo "$NETWORK_SUBNET" | grep -q "172.20\|172.21"; then
+    HAS_CUSTOM_SUBNET=true
+    if echo "$NETWORK_SUBNET" | grep -q "172.20"; then
+        BASE_IP=172.20.0
+    else
+        BASE_IP=172.21.0
+    fi
+fi
+
+for i in $(seq 1 $N); do
+    CONTAINER_NAME="ssh-container-${i}"
+    
+    # Try to assign specific IP if we have a custom subnet
+    if [ "$HAS_CUSTOM_SUBNET" = true ]; then
+        CONTAINER_IP="${BASE_IP}.$((i + 1))"  # Start from .2, .3, .4, etc.
+        # Run container with specific IP address
+        CID=$(docker run -d \
+            --name "${CONTAINER_NAME}" \
+            --network "${NETWORK_NAME}" \
+            --ip "${CONTAINER_IP}" \
+            "${IMAGE_NAME}" 2>&1)
+        RUN_EXIT_CODE=$?
+    else
+        # Run container without specific IP (Docker will assign automatically)
+        CID=$(docker run -d \
+            --name "${CONTAINER_NAME}" \
+            --network "${NETWORK_NAME}" \
+            "${IMAGE_NAME}" 2>&1)
+        RUN_EXIT_CODE=$?
+    fi
+    
+    if [ $RUN_EXIT_CODE -eq 0 ]; then
+        # Extract container ID (first 12 chars)
+        CID_SHORT=$(echo "$CID" | head -c 12)
+        CONTAINER_IDS+=("${CID_SHORT}")
+        CONTAINER_NAMES+=("${CONTAINER_NAME}")
+        
+        # Get actual IP address assigned to container
+        if [ "$HAS_CUSTOM_SUBNET" = true ] && [ $RUN_EXIT_CODE -eq 0 ]; then
+            ACTUAL_IP="${CONTAINER_IP}"
+        else
+            # Get IP from Docker inspect
+            ACTUAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${CONTAINER_NAME}" 2>&1)
+        fi
+        
+        CONTAINER_IPS+=("${ACTUAL_IP}")
+        echo "  Created container ${i}/${N}: ${CONTAINER_NAME} (IP: ${ACTUAL_IP}, ID: ${CID_SHORT})"
+    else
+        echo "Error: Failed to create container ${i}"
+        echo "Error details: $CID"
+        exit 1
+    fi
+done
+
+# Wait for SSH daemons to start
+echo "Waiting for SSH daemons to start..."
+sleep 5
+
+# =============================================================================
+# Step 6: Setup SSH keys in all containers
+# =============================================================================
+# Copies the public key to authorized_keys and private key for client use
+# =============================================================================
+
+echo -e "\n\033[92mStep 6: \033[100mSetting up SSH keys in all containers.\033[0m"
+
+for i in $(seq 0 $((N - 1))); do
+    IP="${CONTAINER_IPS[$i]}"
+    NAME="${CONTAINER_NAMES[$i]}"
+    
+    # Copy public key to root's authorized_keys
+    docker cp "${PUBLIC_KEY}" "${NAME}:/root/.ssh/authorized_keys" 2>&1
+
+    # Copy private key for client use (for pssh and MPI)
+    docker cp "${PRIVATE_KEY}" "${NAME}:/root/.ssh/my_key" 2>&1
+
+    # Fix ownership and permissions inside container for root user
+    docker exec "${NAME}" chown -R root:root /root/.ssh 2>&1
+    docker exec "${NAME}" chmod 700 /root/.ssh 2>&1
+    docker exec "${NAME}" chmod 600 /root/.ssh/authorized_keys 2>&1
+    docker exec "${NAME}" chmod 600 /root/.ssh/my_key 2>&1
+    
+    # Also setup for student user
+    docker exec "${NAME}" mkdir -p /home/student/.ssh 2>&1
+    docker cp "${PUBLIC_KEY}" "${NAME}:/home/student/.ssh/authorized_keys" 2>&1
+    docker exec "${NAME}" chown -R student:student /home/student/.ssh 2>&1
+    docker exec "${NAME}" chmod 700 /home/student/.ssh 2>&1
+    docker exec "${NAME}" chmod 600 /home/student/.ssh/authorized_keys 2>&1
+done
+
+echo "SSH keys configured in all containers."
+
+# =============================================================================
+# Step 7: Scan and add SSH host keys to known_hosts
+# =============================================================================
+# Collects SSH fingerprints from all containers to avoid host key verification prompts
+# =============================================================================
+
+echo -e "\n\033[92mStep 7: \033[100mScanning SSH host keys.\033[0m"
+
+KNOWN_HOSTS_FILE="known_hosts"
+> "${KNOWN_HOSTS_FILE}"  # Clear/create known_hosts file
+
+for IP in "${CONTAINER_IPS[@]}"; do
+    # Remove from user's known_hosts if exists
+    ssh-keygen -f "${HOME}/.ssh/known_hosts" -R "${IP}" 2>&1 || true
+    
+    # Scan and add to our known_hosts file
+    ssh-keyscan -H "${IP}" 2>&1 | tee -a "${KNOWN_HOSTS_FILE}" || true
+done
+
+# Copy known_hosts to all containers
+for i in $(seq 0 $((N - 1))); do
+    NAME="${CONTAINER_NAMES[$i]}"
+    docker cp "${KNOWN_HOSTS_FILE}" "${NAME}:/root/.ssh/known_hosts" 2>&1
+    docker cp "${KNOWN_HOSTS_FILE}" "${NAME}:/home/student/.ssh/known_hosts" 2>&1
+done
+
+echo "SSH host keys scanned and distributed."
+
+# =============================================================================
+# Step 8: Create Python virtual environments and install mpi4py
+# =============================================================================
+# Sets up Python virtual environments in each container and installs mpi4py
+# =============================================================================
+
+echo -e "\n\033[92mStep 8: \033[100mCreating Python virtual environments and installing mpi4py.\033[0m"
+
+for i in $(seq 0 $((N - 1))); do
+    IP="${CONTAINER_IPS[$i]}"
+    NAME="${CONTAINER_NAMES[$i]}"
+    
+    echo "  Setting up virtual environment in container ${NAME} (IP: ${IP})..."
+    
+    # Create virtual environment
+    docker exec "${NAME}" python3 -m venv /root/mpi_env 2>&1
+    
+    # Install mpi4py in virtual environment
+    docker exec "${NAME}" /root/mpi_env/bin/pip install --upgrade pip 2>&1
+    docker exec "${NAME}" /root/mpi_env/bin/pip install mpi4py 2>&1
+    
+    echo "    Virtual environment created and mpi4py installed."
+done
+
+echo "All virtual environments configured."
+
+# =============================================================================
+# Step 9: Copy PingPong program to all containers
+# =============================================================================
+# Copies the PingPong Python program to the master container (rank 0)
+# =============================================================================
+
+echo -e "\n\033[92mStep 9: \033[100mCopying PingPong program to containers.\033[0m"
+
+MASTER_NAME="${CONTAINER_NAMES[0]}"
+MASTER_IP="${CONTAINER_IPS[0]}"
+
+# Copy pingpong.py to master container
+docker cp pingpong.py "${MASTER_NAME}:/root/pingpong.py" 2>&1
+docker exec "${MASTER_NAME}" chmod +x /root/pingpong.py 2>&1
+
+# Also copy to all other containers for consistency
+for i in $(seq 1 $((N - 1))); do
+    NAME="${CONTAINER_NAMES[$i]}"
+    docker cp pingpong.py "${NAME}:/root/pingpong.py" 2>&1
+    docker exec "${NAME}" chmod +x /root/pingpong.py 2>&1
+done
+
+echo "PingPong program copied to all containers."
+
+# =============================================================================
+# Step 10: Create MPI hostfile
+# =============================================================================
+# Creates a hostfile for Open MPI with all container IPs
+# =============================================================================
+
+echo -e "\n\033[92mStep 10: \033[100mCreating MPI hostfile.\033[0m"
+
+HOSTFILE="/tmp/mpi_hostfile"
+> "${HOSTFILE}"  # Clear/create hostfile
+
+# Create hostfile with all container IPs (one slot per container for rank mapping)
+for IP in "${CONTAINER_IPS[@]}"; do
+    echo "${IP} slots=1" >> "${HOSTFILE}"
+done
+
+# Copy hostfile to master container
+docker cp "${HOSTFILE}" "${MASTER_NAME}:/root/mpi_hostfile" 2>&1
+
+echo "MPI hostfile created with ${N} hosts."
+
+# =============================================================================
+# Step 11: Configure SSH for passwordless MPI communication
+# =============================================================================
+# Ensures all containers can SSH to each other without passwords for MPI
+# =============================================================================
+
+echo -e "\n\033[92mStep 11: \033[100mConfiguring SSH for MPI communication.\033[0m"
+
+# Copy SSH keys to all containers and configure known_hosts
+for i in $(seq 0 $((N - 1))); do
+    NAME="${CONTAINER_NAMES[$i]}"
+    
+    # Ensure SSH config allows passwordless login
+    docker exec "${NAME}" bash -c 'echo "StrictHostKeyChecking no" >> /root/.ssh/config' 2>&1
+    docker exec "${NAME}" chmod 600 /root/.ssh/config 2>&1
+done
+
+echo "SSH configured for MPI communication."
+
+# =============================================================================
+# Step 12: Run PingPong program with Open MPI
+# =============================================================================
+# Executes the PingPong program using mpirun across all 9 containers
+# =============================================================================
+
+echo -e "\n\033[92mStep 12: \033[100mRunning PingPong program with Open MPI.\033[0m"
+echo ""
+
+# Build hostfile on master container with proper format (IP slots=1)
+docker exec "${MASTER_NAME}" bash -c "cat > /root/mpi_hostfile << EOF
+${CONTAINER_IPS[0]} slots=1
+${CONTAINER_IPS[1]} slots=1
+${CONTAINER_IPS[2]} slots=1
+${CONTAINER_IPS[3]} slots=1
+${CONTAINER_IPS[4]} slots=1
+${CONTAINER_IPS[5]} slots=1
+${CONTAINER_IPS[6]} slots=1
+${CONTAINER_IPS[7]} slots=1
+${CONTAINER_IPS[8]} slots=1
+EOF" 2>&1
+
+# Run MPI program from master container
+# Using the Python from virtual environment with mpi4py
+# -n 9: run 9 processes total (one per container)
+# --hostfile: use the hostfile we created
+# --mca plm_rsh_agent: specify SSH command for remote execution
+docker exec "${MASTER_NAME}" bash -c "
+    export PATH=/root/mpi_env/bin:\$PATH
+    export OMPI_ALLOW_RUN_AS_ROOT=1
+    export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+    cd /root
+    mpirun -n 9 --hostfile /root/mpi_hostfile --mca plm_rsh_agent 'ssh -i /root/.ssh/my_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' /root/mpi_env/bin/python3 /root/pingpong.py
+" 2>&1
+
+MPI_EXIT_CODE=$?
+
+if [ $MPI_EXIT_CODE -eq 0 ]; then
+    echo ""
+    echo "PingPong program completed successfully."
+    
+    # Copy RESULT.TXT from master container to host
+    if docker cp "${MASTER_NAME}:/root/RESULT.TXT" ./RESULT.TXT 2>&1; then
+        echo ""
+        echo "Results saved to RESULT.TXT:"
+        cat ./RESULT.TXT
+    fi
+else
+    echo ""
+    echo "Error: PingPong program exited with code $MPI_EXIT_CODE"
+fi
+
+# =============================================================================
+# Step 13: Summary
+# =============================================================================
+# Displays summary information
+# =============================================================================
+
+echo -e "\n\033[92mStep 13: \033[100mSummary.\033[0m"
+echo ""
+echo "Created $N containers for MPI:"
+for i in $(seq 0 $((N - 1))); do
+    RANK_TYPE="master" && [ $i -eq 0 ] || RANK_TYPE="client (rank $i)"
+    echo "  Container $((i + 1)): ${CONTAINER_NAMES[$i]} (IP: ${CONTAINER_IPS[$i]}, ${RANK_TYPE})"
+done
+echo ""
+echo "Open MPI configuration:"
+echo "  Master (rank 0): ${CONTAINER_IPS[0]}"
+echo "  Clients (ranks 1-8): ${CONTAINER_IPS[1]} ${CONTAINER_IPS[2]} ${CONTAINER_IPS[3]} ${CONTAINER_IPS[4]} ${CONTAINER_IPS[5]} ${CONTAINER_IPS[6]} ${CONTAINER_IPS[7]} ${CONTAINER_IPS[8]}"
+echo ""
+
+time_stop=$(date +%s.%N)
+time_duration=$(echo "$time_stop - $time_start" | bc)
+echo "Execution duration: ${time_duration} seconds"
+echo ""
+echo "=== N03 Setup and Execution Complete ==="
+echo ""
+echo "To cleanup manually, run:"
+echo "  docker stop \$(docker ps -q --filter 'name=ssh-container-')"
+echo "  docker rm \$(docker ps -aq --filter 'name=ssh-container-')"
+echo "  docker network rm ${NETWORK_NAME}"
+echo "  docker image rm ${IMAGE_NAME}"
+
+exit 0
+
+# =============================================================================
+# ACTUAL OUTPUT (Captured during execution)
+# =============================================================================
+#
+# [The actual terminal output from running this script will be inserted here]
+# [This includes all stdout and stderr from the script execution]
+#
+# =============================================================================
+# RESULT.TXT CONTENT
+# =============================================================================
+#
+# [The contents of RESULT.TXT will be inserted here after execution]
+#
+# =============================================================================
+# STEP-BY-STEP DESCRIPTION
+# =============================================================================
+#
+# STEP 1: Generating SSH keys
+# ----------
+# The script generates an RSA SSH key pair (public and private) for passwordless
+# authentication. These keys will be shared across all containers, enabling
+# Single Sign-On (SSO) functionality and MPI communication.
+#
+# STEP 2: Creating Dockerfile with Open MPI and Python support
+# ----------
+# Creates a Dockerfile that extends the N02 base image by adding:
+# - Open MPI libraries and binaries (libopenmpi-dev, openmpi-bin, openmpi-common)
+# - Python 3 and pip for running MPI programs with mpi4py
+# - Python virtual environment support (python3-venv)
+#
+# STEP 3: Building Docker image
+# ----------
+# Builds the Docker image from the Dockerfile. This image contains all necessary
+# components for SSH communication and MPI execution.
+#
+# STEP 4: Creating Docker network
+# ----------
+# Creates a custom Docker bridge network with a specified subnet (172.20.0.0/16).
+# This allows each container to receive its own unique IP address and communicate
+# with other containers for MPI operations.
+#
+# STEP 5: Creating 9 containers with unique IP addresses
+# ----------
+# Creates 9 Docker containers (one for each MPI rank: 0-8), each assigned an IP
+# address from the subnet. IP addresses are assigned sequentially. Container 1
+# serves as the master (rank 0), containers 2-9 serve as clients (ranks 1-8).
+#
+# STEP 6: Setting up SSH keys in all containers
+# ----------
+# Copies the public SSH key to the authorized_keys file of each container
+# (for both root and student users). Also copies the private key to the container
+# for use with MPI's SSH-based process launcher. Sets correct permissions for SSH files.
+#
+# STEP 7: Scanning and adding SSH host keys
+# ----------
+# Collects SSH fingerprints from all containers and saves them in a known_hosts file.
+# This prevents interactive prompts for host verification during MPI SSH connections.
+# The known_hosts file is copied to all containers.
+#
+# STEP 8: Creating Python virtual environments and installing mpi4py
+# ----------
+# For each container, creates a Python virtual environment in /root/mpi_env and
+# installs the mpi4py package. This provides MPI bindings for Python, allowing
+# the PingPong program to use Open MPI for distributed communication.
+#
+# STEP 9: Copying PingPong program to containers
+# ----------
+# Copies the pingpong.py program to all containers. This program implements the
+# PingPong logic: master sends random floats to clients, clients echo back,
+# master accumulates sum modulo 360 until target range is reached.
+#
+# STEP 10: Creating MPI hostfile
+# ----------
+# Creates an MPI hostfile that lists all container IP addresses. This file tells
+# Open MPI which hosts are available and how many processes can run on each
+# (1 slot per container for proper rank mapping).
+#
+# STEP 11: Configuring SSH for MPI communication
+# ----------
+# Configures SSH on all containers to allow passwordless connections without
+# host key verification prompts. This is necessary for Open MPI's process launcher
+# (plm_rsh_agent) to start processes on remote containers via SSH.
+#
+# STEP 12: Running PingPong program with Open MPI
+# ----------
+# Executes the PingPong program using mpirun with:
+# - 9 processes total (1 master + 8 clients)
+# - One process per container (proper rank assignment)
+# - SSH-based process launching
+# - Python interpreter from virtual environment (with mpi4py)
+# The program runs until the accumulated sum (modulo 360) is between 270.505 and 270.515,
+# then prints the number of ping-pong message pairs and writes to RESULT.TXT.
+#
+# STEP 13: Summary
+# ----------
+# Displays a summary of created containers, their IP addresses, MPI rank assignments,
+# and execution statistics.
+#
+# =============================================================================
+# TECHNICAL NOTES
+# =============================================================================
+#
+# - The script uses Docker's bridge networking with custom subnet for predictable IPs
+# - All containers share the same SSH key pair for SSO functionality
+# - Open MPI uses SSH (via plm_rsh_agent) to launch processes on remote containers
+# - Python virtual environments isolate mpi4py installation per container
+# - The PingPong program uses blocking MPI send/recv for synchronous communication
+# - Master process (rank 0) coordinates all communication and accumulates the sum
+# - Client processes (ranks 1-8) echo received numbers back to master
+# - The program continues until sum % 360 is in the range [270.505, 270.515]
+# - Result includes the count of ping-pong message pairs (iterations)
+#
+# =============================================================================

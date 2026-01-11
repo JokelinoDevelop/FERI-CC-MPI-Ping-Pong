@@ -3,9 +3,11 @@ FROM ubuntu:22.04
 # Prevent interactive prompts during apt installs
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install OpenSSH server, sudo, and parallel-ssh
+# Install OpenSSH server, sudo, parallel-ssh, Open MPI, Python3, pip, and venv
 RUN apt-get update && \
-    apt-get install -y openssh-server sudo pssh && \
+    apt-get install -y openssh-server sudo pssh \
+                       libopenmpi-dev openmpi-bin openmpi-common \
+                       python3 python3-pip python3-venv && \
     mkdir -p /var/run/sshd && \
     rm -rf /var/lib/apt/lists/*
 
